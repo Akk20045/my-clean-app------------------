@@ -1,0 +1,172 @@
+name: Build App
+on: [workflow_dispatch, push]
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --prefer-offline --no-audit
+      - name: Prepare Web App
+        run: node prepare-www.cjs
+      - run: npx cap add android
+      - name: Inject Custom App Icons
+        shell: bash
+        run: |
+          # 1. Remove default Capacitor adaptive XML icons (API 26+) so Android will use our real icons
+          rm -rf android/app/src/main/res/mipmap-anydpi-v26
+          
+          mkdir -p android/app/src/main/res/mipmap-mdpi
+          mkdir -p android/app/src/main/res/mipmap-hdpi
+          mkdir -p android/app/src/main/res/mipmap-xhdpi
+          mkdir -p android/app/src/main/res/mipmap-xxhdpi
+          mkdir -p android/app/src/main/res/mipmap-xxxhdpi
+          mkdir -p android/app/src/main/res/drawable
+
+          if [ -f assets/icon-48.png ]; then
+            cp assets/icon-48.png android/app/src/main/res/mipmap-mdpi/ic_launcher.png || true
+            cp assets/icon-48.png android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png || true
+            cp assets/icon-48.png android/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png || true
+            
+            cp assets/icon-72.png android/app/src/main/res/mipmap-hdpi/ic_launcher.png || true
+            cp assets/icon-72.png android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png || true
+            cp assets/icon-72.png android/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png || true
+            
+            cp assets/icon-96.png android/app/src/main/res/mipmap-xhdpi/ic_launcher.png || true
+            cp assets/icon-96.png android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png || true
+            cp assets/icon-96.png android/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png || true
+            
+            cp assets/icon-144.png android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png || true
+            cp assets/icon-144.png android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png || true
+            cp assets/icon-144.png android/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png || true
+            
+            cp assets/icon-192.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png || true
+            cp assets/icon-192.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png || true
+            cp assets/icon-192.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png || true
+          elif [ -f assets/icon.png ]; then
+            for f in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+              cp assets/icon.png "android/app/src/main/res/mipmap-$f/ic_launcher.png" || true
+              cp assets/icon.png "android/app/src/main/res/mipmap-$f/ic_launcher_round.png" || true
+              cp assets/icon.png "android/app/src/main/res/mipmap-$f/ic_launcher_foreground.png" || true
+            done
+          fi
+
+          if [ -f assets/icon-512.png ]; then
+            cp assets/icon-512.png android/app/src/main/res/drawable/ic_launcher_foreground.png || true
+            cp assets/icon-512.png android/app/src/main/res/drawable/splash.png || true
+          elif [ -f assets/icon.png ]; then
+            cp assets/icon.png android/app/src/main/res/drawable/ic_launcher_foreground.png || true
+            cp assets/icon.png android/app/src/main/res/drawable/splash.png || true
+          fi
+
+          if [ -f assets/splash.png ]; then
+            cp assets/splash.png android/app/src/main/res/drawable/splash.png || true
+          fi
+      - name: Configure Android Manifest & Activity
+        run: node patch-android.cjs
+      - run: npx cap sync android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: 17
+      - name: Build Android APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+          cd ..
+          cp android/app/build/outputs/apk/debug/*.apk ./myapp.apk || cp android/app/build/outputs/apk/*/*/*.apk ./myapp.apk || true
+      - name: Upload Android Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-app
+          path: |
+            *.apk
+            android/app/build/outputs/apk/**/*.apk
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --prefer-offline --no-audit
+      - name: Prepare Web App
+        run: node prepare-www.cjs
+      - name: Create Electron Main
+        shell: bash
+        run: |
+          cat << 'EOF' > main.js
+          const { app, BrowserWindow } = require('electron');
+          const path = require('path');
+          const fs = require('fs');
+          function createWindow () {
+            const iconPath = path.join(__dirname, 'assets', 'icon-512.png');
+            const win = new BrowserWindow({ 
+              width: 1280, 
+              height: 800,
+              icon: fs.existsSync(iconPath) ? iconPath : undefined,
+              autoHideMenuBar: true,
+              webPreferences: {
+                nodeIntegration: false,
+                contextIsolation: true
+              }
+            });
+            win.loadURL('https://service-1078122776585.europe-west2.run.app/');
+          }
+          app.whenReady().then(createWindow);
+          app.on('window-all-closed', () => {
+            if (process.platform !== 'darwin') app.quit();
+          });
+          EOF
+      - name: Build Windows EXE
+        shell: bash
+        run: |
+          npx electron-builder --win --x64 --publish never
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-app
+          path: |
+            dist/*.exe
+            dist/*.zip
+  ios-web-pwa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --prefer-offline --no-audit
+      - name: Prepare Web App
+        run: node prepare-www.cjs
+      - name: Upload Web PWA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-web-pwa
+          path: www
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+        continue-on-error: true
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        continue-on-error: true
+        with:
+          path: 'www'
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
