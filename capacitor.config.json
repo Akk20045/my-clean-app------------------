@@ -1,0 +1,26 @@
+{
+  "appId": "com.mycompany.myapp",
+  "appName": "تحصيل",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true,
+    "allowNavigation": [
+      "*"
+    ],
+    "url": "https://service-1078122776585.europe-west2.run.app/"
+  },
+  "android": {
+    "allowMixedContent": true,
+    "webContentsDebuggingEnabled": true,
+    "backgroundColor": "#00a2ff"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 0,
+      "launchAutoHide": true,
+      "backgroundColor": "#00a2ff"
+    }
+  }
+}
